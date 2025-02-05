@@ -433,6 +433,15 @@ class Controller:
 				logger.error(msg)
 				return ActionResult(error=msg, include_in_memory=True)
 
+		@self.registry.action(
+			description='Wait for a specific amount of time because content on the page is not loaded yet which is indicated by the loading UI element',
+		)
+		async def wait(
+			seconds: int,
+		) -> ActionResult:
+			await asyncio.sleep(seconds)
+			return ActionResult(extracted_content=f'Waited for {seconds} seconds')
+
 	def action(self, description: str, **kwargs):
 		"""Decorator for registering custom actions
 

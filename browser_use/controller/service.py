@@ -55,7 +55,7 @@ class Controller:
 
 		# Basic Navigation Actions
 		@self.registry.action(
-			'Search Google in the current tab',
+			'Search the query in Google in the current tab, the query should be a search query like humans search in Google, concrete and not vague or super long. More the single most important items. ',
 			param_model=SearchGoogleAction,
 		)
 		async def search_google(params: SearchGoogleAction, browser: BrowserContext):
@@ -459,6 +459,7 @@ class Controller:
 		check_for_new_elements: bool = True,
 		page_extraction_llm: Optional[BaseChatModel] = None,
 		sensitive_data: Optional[Dict[str, str]] = None,
+		available_file_paths: Optional[list[str]] = None,
 	) -> list[ActionResult]:
 		"""Execute multiple actions"""
 		results = []
@@ -479,12 +480,14 @@ class Controller:
 				new_path_hashes = set(e.hash.branch_path_hash for e in new_state.selector_map.values())
 				if check_for_new_elements and not new_path_hashes.issubset(cached_path_hashes):
 					# next action requires index but there are new elements on the page
-					logger.info(f'Something new appeared after action {i} / {len(actions)}')
+					msg = f'Something new appeared after action {i} / {len(actions)}'
+					logger.info(msg)
+					results.append(ActionResult(extracted_content=msg, include_in_memory=True))
 					break
 
 			check_break_if_paused()
 
-			results.append(await self.act(action, browser_context, page_extraction_llm, sensitive_data))
+			results.append(await self.act(action, browser_context, page_extraction_llm, sensitive_data, available_file_paths))
 
 			logger.debug(f'Executed action {i + 1} / {len(actions)}')
 			if results[-1].is_done or results[-1].error or i == len(actions) - 1:
@@ -502,6 +505,7 @@ class Controller:
 		browser_context: BrowserContext,
 		page_extraction_llm: Optional[BaseChatModel] = None,
 		sensitive_data: Optional[Dict[str, str]] = None,
+		available_file_paths: Optional[list[str]] = None,
 	) -> ActionResult:
 		"""Execute an action"""
 
@@ -522,6 +526,7 @@ class Controller:
 							browser=browser_context,
 							page_extraction_llm=page_extraction_llm,
 							sensitive_data=sensitive_data,
+							available_file_paths=available_file_paths,
 						)
 
 						Laminar.set_span_output(result)

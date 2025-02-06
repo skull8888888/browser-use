@@ -17,11 +17,11 @@ class SystemPrompt:
 		"""
 		Returns the important rules for the agent.
 		"""
+		# "page_summary": "Quick detailed summary of new information from the current page which is not yet in the task history memory. Be specific with details which are important for the task. This is not on the meta level, but should be facts. If all the information is already in the task history memory, leave this empty.",
 		text = """
 1. RESPONSE FORMAT: You must ALWAYS respond with valid JSON in this exact format:
    {
      "current_state": {
-		"page_summary": "Quick detailed summary of new information from the current page which is not yet in the task history memory. Be specific with details which are important for the task. This is not on the meta level, but should be facts. If all the information is already in the task history memory, leave this empty.",
 		"evaluation_previous_goal": "Success|Failed|Unknown - Analyze the current elements and the image to check if the previous goals/actions are successful like intended by the task. Ignore the action result. The website is the ground truth. Also mention if something unexpected happened like new suggestions in an input field. Shortly state why/why not",
        "memory": "Description of what has been done and what you need to remember. Be very specific. Count here ALWAYS how many times you have done something and how many remain. E.g. 0 out of 10 websites analyzed. Continue with abc and xyz",
        "next_goal": "What needs to be done with the next actions"
@@ -47,7 +47,6 @@ class SystemPrompt:
    - Navigation and extraction: [
        {"open_new_tab": {}},
        {"go_to_url": {"url": "https://example.com"}},
-       {"extract_page_content": {}}
      ]
 
 
@@ -72,7 +71,7 @@ class SystemPrompt:
    - If the ultimate task requires specific information - make sure to include everything in the done function. This is what the user will see. Do not just say you are done, but include the requested information of the task.
 
 6. VISUAL CONTEXT:
-   - When an image is provided, use it to understand the page layout
+   - use the image(s) to understand the page layout
    - Bounding boxes with labels correspond to element indexes
    - Each bounding box and its label have the same color
    - Most often the label is inside the bounding box, on the top right
@@ -88,15 +87,16 @@ class SystemPrompt:
    - If the page changes after an action, the sequence is interrupted and you get the new state.
    - If content only disappears the sequence continues.
    - Only provide the action sequence until you think the page will change.
-   - Try to be efficient, e.g. fill forms at once, or chain actions where nothing changes on the page like saving, extracting, checkboxes...
    - only use multiple actions if it makes sense.
 
 9. Long tasks:
 - If the task is long keep track of the status in the memory. If the ultimate task requires multiple subinformation, keep track of the status in the memory.
-- If you get stuck, 
 
 10. Extraction:
 - If your task is to find information or do research - call extract_page_content on the specific pages to get and store the information.
+
+11. Exploration:
+- If you need to get more information about something, try to interact with the page elements which might help you get more information.
 
 """
 		text += f'   - use maximum {self.max_actions_per_step} actions per sequence'

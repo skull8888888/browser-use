@@ -3,7 +3,6 @@ import json
 import logging
 from typing import Callable, Dict, Optional, Type
 
-from langchain_core.prompts import PromptTemplate
 from lmnr import Laminar, observe
 from pydantic import BaseModel
 
@@ -157,28 +156,28 @@ class Controller:
 			logger.info(msg)
 			return ActionResult(extracted_content=msg, include_in_memory=True)
 
-		# Content Actions
-		@self.registry.action(
-			'Extract page content to retrieve specific information from the page, e.g. all company names, a specifc description, all information about, links with companies in structured format or simply links',
-		)
-		async def extract_content(goal: str, browser: BrowserContext, page_extraction_llm: BaseChatModel):
-			page = await browser.get_current_page()
-			import markdownify
+		# # Content Actions
+		# @self.registry.action(
+		# 	'Extract page content to retrieve specific information from the page, e.g. all company names, a specifc description, all information about, links with companies in structured format or simply links',
+		# )
+		# async def extract_content(goal: str, browser: BrowserContext, page_extraction_llm: BaseChatModel):
+		# 	page = await browser.get_current_page()
+		# 	import markdownify
 
-			content = markdownify.markdownify(await page.content())
+		# 	content = markdownify.markdownify(await page.content())
 
-			prompt = 'Your task is to extract the content of the page. You will be given a page and a goal and you should extract all relevant information around this goal from the page. If the goal is vague, summarize the page. Respond in json format. Extraction goal: {goal}, Page: {page}'
-			template = PromptTemplate(input_variables=['goal', 'page'], template=prompt)
-			try:
-				output = page_extraction_llm.invoke(template.format(goal=goal, page=content))
-				msg = f'📄  Extracted from page\n: {output.content}\n'
-				logger.info(msg)
-				return ActionResult(extracted_content=msg, include_in_memory=True)
-			except Exception as e:
-				logger.debug(f'Error extracting content: {e}')
-				msg = f'📄  Extracted from page\n: {content}\n'
-				logger.info(msg)
-				return ActionResult(extracted_content=msg)
+		# 	prompt = 'Your task is to extract the content of the page. You will be given a page and a goal and you should extract all relevant information around this goal from the page. If the goal is vague, summarize the page. Respond in json format. Extraction goal: {goal}, Page: {page}'
+		# 	template = PromptTemplate(input_variables=['goal', 'page'], template=prompt)
+		# 	try:
+		# 		output = page_extraction_llm.invoke(template.format(goal=goal, page=content))
+		# 		msg = f'📄  Extracted from page\n: {output.content}\n'
+		# 		logger.info(msg)
+		# 		return ActionResult(extracted_content=msg, include_in_memory=True)
+		# 	except Exception as e:
+		# 		logger.debug(f'Error extracting content: {e}')
+		# 		msg = f'📄  Extracted from page\n: {content}\n'
+		# 		logger.info(msg)
+		# 		return ActionResult(extracted_content=msg)
 
 		@self.registry.action(
 			'Scroll down the page by pixel amount - if no amount is specified, scroll down one page',
@@ -232,40 +231,40 @@ class Controller:
 			logger.info(msg)
 			return ActionResult(extracted_content=msg, include_in_memory=True)
 
-		@self.registry.action(
-			description='If you dont find something which you want to interact with, scroll to it',
-		)
-		async def scroll_to_text(text: str, browser: BrowserContext):  # type: ignore
-			page = await browser.get_current_page()
-			try:
-				# Try different locator strategies
-				locators = [
-					page.get_by_text(text, exact=False),
-					page.locator(f'text={text}'),
-					page.locator(f"//*[contains(text(), '{text}')]"),
-				]
+		# @self.registry.action(
+		# 	description='If you dont find something which you want to interact with, scroll to it',
+		# )
+		# async def scroll_to_text(text: str, browser: BrowserContext):  # type: ignore
+		# 	page = await browser.get_current_page()
+		# 	try:
+		# 		# Try different locator strategies
+		# 		locators = [
+		# 			page.get_by_text(text, exact=False),
+		# 			page.locator(f'text={text}'),
+		# 			page.locator(f"//*[contains(text(), '{text}')]"),
+		# 		]
 
-				for locator in locators:
-					try:
-						# First check if element exists and is visible
-						if await locator.count() > 0 and await locator.first.is_visible():
-							await locator.first.scroll_into_view_if_needed()
-							await asyncio.sleep(0.5)  # Wait for scroll to complete
-							msg = f'🔍  Scrolled to text: {text}'
-							logger.info(msg)
-							return ActionResult(extracted_content=msg, include_in_memory=True)
-					except Exception as e:
-						logger.debug(f'Locator attempt failed: {str(e)}')
-						continue
+		# 		for locator in locators:
+		# 			try:
+		# 				# First check if element exists and is visible
+		# 				if await locator.count() > 0 and await locator.first.is_visible():
+		# 					await locator.first.scroll_into_view_if_needed()
+		# 					await asyncio.sleep(0.5)  # Wait for scroll to complete
+		# 					msg = f'🔍  Scrolled to text: {text}'
+		# 					logger.info(msg)
+		# 					return ActionResult(extracted_content=msg, include_in_memory=True)
+		# 			except Exception as e:
+		# 				logger.debug(f'Locator attempt failed: {str(e)}')
+		# 				continue
 
-				msg = f"Text '{text}' not found or not visible on page"
-				logger.info(msg)
-				return ActionResult(extracted_content=msg, include_in_memory=True)
+		# 		msg = f"Text '{text}' not found or not visible on page"
+		# 		logger.info(msg)
+		# 		return ActionResult(extracted_content=msg, include_in_memory=True)
 
-			except Exception as e:
-				msg = f"Failed to scroll to text '{text}': {str(e)}"
-				logger.error(msg)
-				return ActionResult(error=msg, include_in_memory=True)
+		# 	except Exception as e:
+		# 		msg = f"Failed to scroll to text '{text}': {str(e)}"
+		# 		logger.error(msg)
+		# 		return ActionResult(error=msg, include_in_memory=True)
 
 		@self.registry.action(
 			description='Get all options from a native dropdown',

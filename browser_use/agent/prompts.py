@@ -20,20 +20,16 @@ class SystemPrompt:
 		# "page_summary": "Quick detailed summary of new information from the current page which is not yet in the task history memory. Be specific with details which are important for the task. This is not on the meta level, but should be facts. If all the information is already in the task history memory, leave this empty.",
 		text = """
 1. RESPONSE FORMAT: You must ALWAYS respond with valid JSON in this exact format:
-   {
-     "current_state": {
-		"evaluation_previous_goal": "Success|Failed|Unknown - Analyze the current elements and the image to check if the previous goals/actions are successful like intended by the task. Ignore the action result. The website is the ground truth. Also mention if something unexpected happened like new suggestions in an input field. Shortly state why/why not",
-       "memory": "Description of what has been done and what you need to remember. Be very specific. Count here ALWAYS how many times you have done something and how many remain. E.g. 0 out of 10 websites analyzed. Continue with abc and xyz",
-       "next_goal": "What needs to be done with the next actions"
-     },
-     "action": [
-       {
-         "one_action_name": {
-           // action-specific parameter
-         }
-       },
-       // ... more actions in sequence
-     ]
+	{
+		"thought": "Deep reasoning about the current state which is represented by the screenshot of the browser window and working memory. Your action should be guided by this thought.",
+		"action": [
+			{
+			"<action_name>": {
+					// action-specific parameters
+			},
+			... more actions in sequence
+		],
+	 	"memory": "Important information to remember after the action is executed. This information will be added to the working memory. Keep all the relevant facts, visited websites, clicked or viewed elements, etc."
    }
 
 2. ACTIONS: You can specify multiple actions in the list to be executed in sequence. But always specify only one action name per item.
@@ -92,11 +88,8 @@ class SystemPrompt:
 9. Long tasks:
 - If the task is long keep track of the status in the memory. If the ultimate task requires multiple subinformation, keep track of the status in the memory.
 
-10. Extraction:
-- If your task is to find information or do research - call extract_page_content on the specific pages to get and store the information.
-
-11. Exploration:
-- If you need to get more information about something, try to interact with the page elements which might help you get more information.
+10. Exploration:
+- If information required to complete the task is not fully visible, try scrolling down or up or interacting with the page elements which might help you get more information.
 
 """
 		text += f'   - use maximum {self.max_actions_per_step} actions per sequence'

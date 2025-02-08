@@ -6,11 +6,8 @@ import io
 import json
 import logging
 import os
-import platform
 import re
-import textwrap
 import uuid
-from io import BytesIO
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Type, TypeVar
 
@@ -18,9 +15,7 @@ from dotenv import load_dotenv
 from google.api_core.exceptions import ResourceExhausted
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import (
-	AIMessage,
 	BaseMessage,
-	HumanMessage,
 	SystemMessage,
 )
 from lmnr import observe
@@ -29,7 +24,7 @@ from PIL import Image, ImageDraw, ImageFont
 from pydantic import BaseModel, ValidationError
 
 from browser_use.agent.message_manager.service import MessageManager
-from browser_use.agent.prompts import AgentMessagePrompt, PlannerPrompt, SystemPrompt
+from browser_use.agent.prompts import AgentMessagePrompt, SystemPrompt
 from browser_use.agent.views import (
 	ActionResult,
 	AgentError,
@@ -280,12 +275,6 @@ class Agent:
 			self._check_if_stopped_or_paused()
 			self.message_manager.add_state_message(state, self._last_result, step_info, self.use_vision)
 
-			# Run planner at specified intervals if planner is configured
-			if self.planner_llm and self.n_steps % self.planning_interval == 0:
-				plan = await self._run_planner()
-				# add plan before last state message
-				self.message_manager.add_plan(plan, position=-1)
-
 			input_messages = self.message_manager.get_messages()
 
 			self._check_if_stopped_or_paused()
@@ -297,7 +286,7 @@ class Agent:
 					self.register_new_step_callback(state, model_output, self.n_steps)
 
 				self._save_conversation(input_messages, model_output)
-				self.message_manager._remove_last_state_message()  # we dont want the whole state in the chat history
+				# self.message_manager._remove_last_state_message()  # we dont want the whole state in the chat history
 
 				self._check_if_stopped_or_paused()
 
@@ -416,36 +405,18 @@ class Agent:
 		"""Convert input messages to a format that is compatible with the planner model"""
 		if model_name is None:
 			return input_messages
-		if model_name == 'deepseek-reasoner' or model_name.startswith('deepseek-r1'):
-			converted_input_messages = self.message_manager.convert_messages_for_non_function_calling_models(input_messages)
-			merged_input_messages = self.message_manager.merge_successive_messages(converted_input_messages, HumanMessage)
-			merged_input_messages = self.message_manager.merge_successive_messages(merged_input_messages, AIMessage)
-			return merged_input_messages
 		return input_messages
 
 	@time_execution_async('--get_next_action')
 	async def get_next_action(self, input_messages: list[BaseMessage]) -> AgentOutput:
 		"""Get next action from LLM based on current state"""
-		converted_input_messages = self._convert_input_messages(input_messages, self.model_name)
 
-		if self.model_name == 'deepseek-reasoner' or self.model_name.startswith('deepseek-r1'):
-			output = self.llm.invoke(converted_input_messages)
-			output.content = self._remove_think_tags(output.content)
-			# TODO: currently invoke does not return reasoning_content, we should override invoke
-			try:
-				parsed_json = self.message_manager.extract_json_from_model_output(output.content)
-				parsed = self.AgentOutput(**parsed_json)
-			except (ValueError, ValidationError) as e:
-				logger.warning(f'Failed to parse model output: {output} {str(e)}')
-				raise ValueError('Could not parse response.')
-		elif self.tool_calling_method is None:
+		if self.tool_calling_method is None:
 			structured_llm = self.llm.with_structured_output(self.AgentOutput, include_raw=True)
-			print('AAAAAA input_messages', input_messages)
 			response: dict[str, Any] = await structured_llm.ainvoke(input_messages)  # type: ignore
 			parsed: AgentOutput | None = response['parsed']
 		else:
 			structured_llm = self.llm.with_structured_output(self.AgentOutput, include_raw=True, method=self.tool_calling_method)
-			print('BBBBB input_messages', input_messages)
 			response: dict[str, Any] = await structured_llm.ainvoke(input_messages)  # type: ignore
 			parsed: AgentOutput | None = response['parsed']
 
@@ -461,16 +432,8 @@ class Agent:
 
 	def _log_response(self, response: AgentOutput) -> None:
 		"""Log the model's response"""
-		if 'Success' in response.current_state.evaluation_previous_goal:
-			emoji = '👍'
-		elif 'Failed' in response.current_state.evaluation_previous_goal:
-			emoji = '⚠'
-		else:
-			emoji = '🤷'
-		logger.debug(f'🤖 {emoji} Page summary: {response.current_state.page_summary}')
-		logger.info(f'{emoji} Eval: {response.current_state.evaluation_previous_goal}')
-		logger.info(f'🧠 Memory: {response.current_state.memory}')
-		logger.info(f'🎯 Next goal: {response.current_state.next_goal}')
+		logger.info(f'💡 Thought: {response.thought}')
+		logger.info(f'🧠 Memory: {response.memory}')
 		for i, action in enumerate(response.action):
 			logger.info(f'🛠️  Action {i + 1}/{len(response.action)}: {action.model_dump_json(exclude_unset=True)}')
 
@@ -588,13 +551,6 @@ class Agent:
 			if not self.injected_browser and self.browser:
 				await self.browser.close()
 
-			if self.generate_gif:
-				output_path: str = 'agent_history.gif'
-				if isinstance(self.generate_gif, str):
-					output_path = self.generate_gif
-
-				self.create_history_gif(output_path=output_path)
-
 	def _too_many_failures(self) -> bool:
 		"""Check if we should stop due to too many failures"""
 		if self.consecutive_failures >= self.max_failures:
@@ -676,50 +632,7 @@ class Agent:
 				List of action results
 		"""
 		# Execute initial actions if provided
-		if self.initial_actions:
-			await self.controller.multi_act(
-				self.initial_actions,
-				self.browser_context,
-				check_for_new_elements=False,
-				page_extraction_llm=self.page_extraction_llm,
-				check_break_if_paused=lambda: self._check_if_stopped_or_paused(),
-				available_file_paths=self.available_file_paths,
-			)
-
 		results = []
-
-		for i, history_item in enumerate(history.history):
-			goal = history_item.model_output.current_state.next_goal if history_item.model_output else ''
-			logger.info(f'Replaying step {i + 1}/{len(history.history)}: goal: {goal}')
-
-			if (
-				not history_item.model_output
-				or not history_item.model_output.action
-				or history_item.model_output.action == [None]
-			):
-				logger.warning(f'Step {i + 1}: No action to replay, skipping')
-				results.append(ActionResult(error='No action to replay'))
-				continue
-
-			retry_count = 0
-			while retry_count < max_retries:
-				try:
-					result = await self._execute_history_step(history_item, delay_between_actions)
-					results.extend(result)
-					break
-
-				except Exception as e:
-					retry_count += 1
-					if retry_count == max_retries:
-						error_msg = f'Step {i + 1} failed after {max_retries} attempts: {str(e)}'
-						logger.error(error_msg)
-						if not skip_failures:
-							results.append(ActionResult(error=error_msg))
-							raise RuntimeError(error_msg)
-					else:
-						logger.warning(f'Step {i + 1} failed (attempt {retry_count}/{max_retries}), retrying...')
-						await asyncio.sleep(delay_between_actions)
-
 		return results
 
 	async def _execute_history_step(self, history_item: AgentHistory, delay: float) -> list[ActionResult]:
@@ -792,119 +705,6 @@ class Agent:
 		if not file_path:
 			file_path = 'AgentHistory.json'
 		self.history.save_to_file(file_path)
-
-	def create_history_gif(
-		self,
-		output_path: str = 'agent_history.gif',
-		duration: int = 3000,
-		show_goals: bool = True,
-		show_task: bool = True,
-		show_logo: bool = False,
-		font_size: int = 40,
-		title_font_size: int = 56,
-		goal_font_size: int = 44,
-		margin: int = 40,
-		line_spacing: float = 1.5,
-	) -> None:
-		"""Create a GIF from the agent's history with overlaid task and goal text."""
-		if not self.history.history:
-			logger.warning('No history to create GIF from')
-			return
-
-		images = []
-		# if history is empty or first screenshot is None, we can't create a gif
-		if not self.history.history or not self.history.history[0].state.screenshot:
-			logger.warning('No history or first screenshot to create GIF from')
-			return
-
-		# Try to load nicer fonts
-		try:
-			# Try different font options in order of preference
-			font_options = ['Helvetica', 'Arial', 'DejaVuSans', 'Verdana']
-			font_loaded = False
-
-			for font_name in font_options:
-				try:
-					if platform.system() == 'Windows':
-						# Need to specify the abs font path on Windows
-						font_name = os.path.join(os.getenv('WIN_FONT_DIR', 'C:\\Windows\\Fonts'), font_name + '.ttf')
-					regular_font = ImageFont.truetype(font_name, font_size)
-					title_font = ImageFont.truetype(font_name, title_font_size)
-					goal_font = ImageFont.truetype(font_name, goal_font_size)
-					font_loaded = True
-					break
-				except OSError:
-					continue
-
-			if not font_loaded:
-				raise OSError('No preferred fonts found')
-
-		except OSError:
-			regular_font = ImageFont.load_default()
-			title_font = ImageFont.load_default()
-
-			goal_font = regular_font
-
-		# Load logo if requested
-		logo = None
-		if show_logo:
-			try:
-				logo = Image.open('./static/browser-use.png')
-				# Resize logo to be small (e.g., 40px height)
-				logo_height = 150
-				aspect_ratio = logo.width / logo.height
-				logo_width = int(logo_height * aspect_ratio)
-				logo = logo.resize((logo_width, logo_height), Image.Resampling.LANCZOS)
-			except Exception as e:
-				logger.warning(f'Could not load logo: {e}')
-
-		# Create task frame if requested
-		if show_task and self.task:
-			task_frame = self._create_task_frame(
-				self.task,
-				self.history.history[0].state.screenshot,
-				title_font,
-				regular_font,
-				logo,
-				line_spacing,
-			)
-			images.append(task_frame)
-
-		# Process each history item
-		for i, item in enumerate(self.history.history, 1):
-			if not item.state.screenshot:
-				continue
-
-			# Convert base64 screenshot to PIL Image
-			img_data = base64.b64decode(item.state.screenshot)
-			image = Image.open(io.BytesIO(img_data))
-
-			if show_goals and item.model_output:
-				image = self._add_overlay_to_image(
-					image=image,
-					step_number=i,
-					goal_text=item.model_output.current_state.next_goal,
-					regular_font=regular_font,
-					title_font=title_font,
-					margin=margin,
-					logo=logo,
-				)
-
-			images.append(image)
-
-		if images:
-			# Save the GIF
-			images[0].save(
-				output_path,
-				save_all=True,
-				append_images=images[1:],
-				duration=duration,
-				loop=0,
-				optimize=False,
-			)
-			logger.info(f'Created GIF at {output_path}')
-		else:
-			logger.warning('No images found in history to create GIF')
 
 	def _create_task_frame(
 		self,
@@ -1090,111 +890,6 @@ class Agent:
 
 		return '\n'.join(lines)
 
-	def _create_frame(self, screenshot: str, text: str, step_number: int, width: int = 1200, height: int = 800) -> Image.Image:
-		"""Create a frame for the GIF with improved styling"""
-
-		# Create base image
-		frame = Image.new('RGB', (width, height), 'white')
-
-		# Load and resize screenshot
-		screenshot_img = Image.open(BytesIO(base64.b64decode(screenshot)))
-		screenshot_img.thumbnail((width - 40, height - 160))  # Leave space for text
-
-		# Calculate positions
-		screenshot_x = (width - screenshot_img.width) // 2
-		screenshot_y = 120  # Leave space for header
-
-		# Draw screenshot
-		frame.paste(screenshot_img, (screenshot_x, screenshot_y))
-
-		# Load browser-use logo
-		logo_size = 100  # Increased size for browser-use logo
-		logo_path = os.path.join(os.path.dirname(__file__), 'assets/browser-use-logo.png')
-		if os.path.exists(logo_path):
-			logo = Image.open(logo_path)
-			logo.thumbnail((logo_size, logo_size))
-			frame.paste(logo, (width - logo_size - 20, 20), logo if 'A' in logo.getbands() else None)
-
-		# Create drawing context
-		draw = ImageDraw.Draw(frame)
-
-		# Load fonts
-		try:
-			title_font = ImageFont.truetype('Arial.ttf', 36)  # Increased font size
-			text_font = ImageFont.truetype('Arial.ttf', 24)  # Increased font size
-			number_font = ImageFont.truetype('Arial.ttf', 48)  # Increased font size for step number
-		except:
-			title_font = ImageFont.load_default()
-			text_font = ImageFont.load_default()
-			number_font = ImageFont.load_default()
-
-		# Draw task text with increased spacing
-		margin = 80  # Increased margin
-		max_text_width = width - (2 * margin)
-
-		# Create rounded rectangle for goal text
-		text_padding = 20
-		text_lines = textwrap.wrap(text, width=60)
-		text_height = sum(draw.textsize(line, font=text_font)[1] for line in text_lines)
-		text_box_height = text_height + (2 * text_padding)
-
-		# Draw rounded rectangle background for goal
-		goal_bg_coords = [
-			margin - text_padding,
-			40,  # Top position
-			width - margin + text_padding,
-			40 + text_box_height,
-		]
-		draw.rounded_rectangle(
-			goal_bg_coords,
-			radius=15,  # Increased radius for more rounded corners
-			fill='#f0f0f0',
-		)
-
-		# Draw browser-use small logo in top left of goal box
-		small_logo_size = 30
-		if os.path.exists(logo_path):
-			small_logo = Image.open(logo_path)
-			small_logo.thumbnail((small_logo_size, small_logo_size))
-			frame.paste(
-				small_logo,
-				(margin - text_padding + 10, 45),  # Positioned inside goal box
-				small_logo if 'A' in small_logo.getbands() else None,
-			)
-
-		# Draw text with proper wrapping
-		y = 50  # Starting y position for text
-		for line in text_lines:
-			draw.text((margin + small_logo_size + 20, y), line, font=text_font, fill='black')
-			y += draw.textsize(line, font=text_font)[1] + 5
-
-		# Draw step number with rounded background
-		number_text = str(step_number)
-		number_size = draw.textsize(number_text, font=number_font)
-		number_padding = 20
-		number_box_width = number_size[0] + (2 * number_padding)
-		number_box_height = number_size[1] + (2 * number_padding)
-
-		# Draw rounded rectangle for step number
-		number_bg_coords = [
-			20,  # Left position
-			height - number_box_height - 20,  # Bottom position
-			20 + number_box_width,
-			height - 20,
-		]
-		draw.rounded_rectangle(
-			number_bg_coords,
-			radius=15,
-			fill='#007AFF',  # Blue background
-		)
-
-		# Center number in its background
-		number_x = number_bg_coords[0] + ((number_box_width - number_size[0]) // 2)
-		number_y = number_bg_coords[1] + ((number_box_height - number_size[1]) // 2)
-		draw.text((number_x, number_y), number_text, font=number_font, fill='white')
-
-		return frame
-
 	def pause(self) -> None:
 		"""Pause the agent before the next step"""
 		logger.info('🔄 pausing Agent ')
@@ -1231,48 +926,3 @@ class Agent:
 			converted_actions.append(action_model)
 
 		return converted_actions
-
-	async def _run_planner(self) -> Optional[str]:
-		"""Run the planner to analyze state and suggest next steps"""
-		# Skip planning if no planner_llm is set
-		if not self.planner_llm:
-			return None
-
-		# Create planner message history using full message history
-		planner_messages = [
-			PlannerPrompt(self.action_descriptions).get_system_message(),
-			*self.message_manager.get_messages()[1:],  # Use full message history except the first
-		]
-
-		if not self.use_vision_for_planner and self.use_vision:
-			last_state_message = planner_messages[-1]
-			# remove image from last state message
-			new_msg = ''
-			if isinstance(last_state_message.content, list):
-				for msg in last_state_message.content:
-					if msg['type'] == 'text':
-						new_msg += msg['text']
-					elif msg['type'] == 'image_url':
-						continue
-			else:
-				new_msg = last_state_message.content
-
-			planner_messages[-1] = HumanMessage(content=new_msg)
-
-		planner_messages = self._convert_input_messages(planner_messages, self.planner_model_name)
-		# Get planner output
-		response = await self.planner_llm.ainvoke(planner_messages)
-		plan = response.content
-		# if deepseek-reasoner, remove think tags
-		if self.planner_model_name == 'deepseek-reasoner':
-			plan = self._remove_think_tags(plan)
-		try:
-			plan_json = json.loads(plan)
-			logger.info(f'Planning Analysis:\n{json.dumps(plan_json, indent=4)}')
-		except json.JSONDecodeError:
-			logger.info(f'Planning Analysis:\n{plan}')
-		except Exception as e:
-			logger.debug(f'Error parsing planning analysis: {e}')
-			logger.info(f'Plan: {plan}')
-
-		return plan

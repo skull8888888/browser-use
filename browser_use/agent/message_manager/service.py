@@ -2,10 +2,8 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime
 from typing import Dict, List, Optional, Type
 
-from langchain_anthropic import ChatAnthropic
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import (
 	AIMessage,
@@ -14,7 +12,6 @@ from langchain_core.messages import (
 	SystemMessage,
 	ToolMessage,
 )
-from langchain_openai import ChatOpenAI
 
 from browser_use.agent.message_manager.views import MessageHistory, MessageMetadata
 from browser_use.agent.prompts import AgentMessagePrompt, SystemPrompt
@@ -81,13 +78,9 @@ class MessageManager:
 			{
 				'name': 'AgentOutput',
 				'args': {
-					'current_state': {
-						'page_summary': 'On the page are company a,b,c wtih their revenue 1,2,3.',
-						'evaluation_previous_goal': 'Success - I opend the first page',
-						'memory': 'Starting with the new task. I have completed 1/10 steps',
-						'next_goal': 'Click on company a',
-					},
+					'thought': 'I need to click on the first element',
 					'action': [{'click_element': {'index': 0}}],
+					'memory': 'I have clicked on the first element',
 				},
 				'id': str(self.tool_id),
 				'type': 'tool_call',
@@ -95,12 +88,12 @@ class MessageManager:
 		]
 
 		example_tool_call = AIMessage(
-			content=f'',
+			content='',
 			tool_calls=tool_calls,
 		)
 		self._add_message_with_tokens(example_tool_call)
 		tool_message = ToolMessage(
-			content=f'Browser started',
+			content='Browser started',
 			tool_call_id=str(self.tool_id),
 		)
 		self._add_message_with_tokens(tool_message)
@@ -368,4 +361,5 @@ class MessageManager:
 			return json.loads(content)
 		except json.JSONDecodeError as e:
 			logger.warning(f'Failed to parse model output: {content} {str(e)}')
+			print('Failed to parse model output: ', content)
 			raise ValueError('Could not parse response.')

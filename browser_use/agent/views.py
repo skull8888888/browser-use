@@ -37,7 +37,6 @@ class ActionResult(BaseModel):
 class AgentBrain(BaseModel):
 	"""Current state of the agent"""
 
-	page_summary: str
 	evaluation_previous_goal: str
 	memory: str
 	next_goal: str
@@ -51,8 +50,9 @@ class AgentOutput(BaseModel):
 
 	model_config = ConfigDict(arbitrary_types_allowed=True)
 
-	current_state: AgentBrain
+	thought: str
 	action: list[ActionModel]
+	memory: str
 
 	@staticmethod
 	def type_with_custom_actions(custom_actions: Type[ActionModel]) -> Type['AgentOutput']:
@@ -94,8 +94,9 @@ class AgentHistory(BaseModel):
 		if self.model_output:
 			action_dump = [action.model_dump(exclude_none=True) for action in self.model_output.action]
 			model_output_dump = {
-				'current_state': self.model_output.current_state.model_dump(),
+				'thought': self.model_output.thought,
 				'action': action_dump,  # This preserves the actual action data
+				'memory': self.model_output.memory,
 			}
 
 		return {
@@ -197,9 +198,9 @@ class AgentHistoryList(BaseModel):
 				action_names.append(actions[0])
 		return action_names
 
-	def model_thoughts(self) -> list[AgentBrain]:
+	def model_thoughts(self) -> list[str]:
 		"""Get all thoughts from history"""
-		return [h.model_output.current_state for h in self.history if h.model_output]
+		return [h.model_output.thought for h in self.history if h.model_output]
 
 	def model_outputs(self) -> list[AgentOutput]:
 		"""Get all model outputs from history"""
